@@ -162,7 +162,7 @@ import React, { useState, useEffect ,useCallback} from 'react';
       {selectedStudent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg w-96">
-            <h3 className="text-xl font-bold mb-4">Add Grade for {selectedStudent.username}</h3>
+            <h3 className="text-xl font-bold mb-4">Add Grade for Thaqiya {selectedStudent.username}</h3>
             <form onSubmit={handleGradeSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Grade (0-100)</label>
