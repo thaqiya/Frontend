@@ -36,7 +36,7 @@ const Register: React.FC<RegisterProps> = ({ onRegister, onSwitchToLogin }) => {
       });
 
       if (response.ok) {
-        alert('Registration successful! Please login.');
+        alert('Registration successful Thaqiya! Please login.');
         onRegister();
       } else {
         const data = await response.json();
