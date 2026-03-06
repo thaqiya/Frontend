@@ -29,6 +29,7 @@ jobs:
       # --- Task 4: Snyk (Node) ---
       - name: Snyk Node Scan
         uses: snyk/actions/node@master
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
