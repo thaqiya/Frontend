@@ -13,38 +13,64 @@ env:
 jobs:
   security-and-build:
     runs-on: ubuntu-latest
+
     steps:
+      # Checkout code
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # --- Task 3: SonarQube ---
+      # Setup Node
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          npm install
+
+      # Build React app
+      - name: Build frontend
+        run: |
+          npm run build
+
+      # SonarCloud Scan
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      # --- Task 4: Snyk (Node) ---
-      - name: Snyk Node Scan
+      # Snyk Scan
+      - name: Run Snyk Test
         uses: snyk/actions/node@master
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # --- Build & Push ---
+      # Upload results to Snyk Dashboard
+      - name: Upload results to Snyk Dashboard
+        run: |
+          npm install -g snyk
+          snyk auth ${{ secrets.SNYK_TOKEN }}
+          snyk monitor
+
+      # Docker login
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # Build and push Docker image
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
           context: .
-          build-args: REACT_APP_API_URL=${{ env.REACT_APP_API_URL }}
+          build-args: |
+            REACT_APP_API_URL=${{ env.REACT_APP_API_URL }}
           push: true
           tags: ${{ env.DOCKER_IMAGE }}:latest
 
@@ -52,32 +78,64 @@ jobs:
     needs: security-and-build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
     steps:
-      - name: Create SSH key and Deploy
+      # Checkout
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Setup SSH
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      # Deploy frontend container
+      - name: Deploy frontend container
+        run: |
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} '
             docker-compose pull frontend
-            docker-compose up -d --no-deps frontend'
+            docker-compose up -d --no-deps frontend
+          '
 
-      # --- Task 6: ZAP Scan ---
-      - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          target: 'http://${{ secrets.SERVER_IP }}:4000'
-          issue_title: 'Security Scan Report'
-          allow_issue_writing: true
-          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
-          cmd_options: '--dir /zap/wrk/zap-workspace'
+      # Wait until frontend is ready
+      - name: Wait for frontend to be ready
+        run: |
+          echo "Waiting for frontend to start..."
+          for i in {1..30}; do
+            if curl -s http://${{ secrets.SERVER_IP }} >/dev/null; then
+              echo "Frontend is up!"
+              break
+            fi
+            sleep 2
+          done
 
+      # Run ZAP scan on VM
+      - name: Run ZAP on VM
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} '
+            docker pull ghcr.io/zaproxy/zaproxy:stable
+            docker run --rm -v /tmp:/zap/wrk -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
+              -t http://${{ secrets.SERVER_IP }} \
+              -r zap_report_frontend.html \
+              -I -d
+          '
+
+      # Copy ZAP report from VM
+      - name: Download ZAP report
+        run: |
+          scp ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/tmp/zap_report_frontend.html ./zap_report_frontend.html
+
+      # Upload ZAP report artifact
       - name: Upload ZAP Reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: zap-reports
-          path: zap-workspace/report_json.json, zap-workspace/report_md.md, zap-workspace/rep>
-
-
+          name: zap-reports-frontend
+          path: zap_report_frontend.html
